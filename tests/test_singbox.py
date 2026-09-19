@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from utils.singbox import build_config, mask_link, parse_share_link, parse_share_links
+from utils.singbox import ParsedNode, build_config, mask_link, parse_share_link, parse_share_links
 
 VLESS_REALITY = (
 	'vless://11111111-2222-3333-4444-555555555555@1.2.3.4:443'
@@ -51,8 +51,15 @@ VMESS_PAYLOAD = {
 }
 
 
+def _parse_ok(link: str) -> ParsedNode:
+	"""解析并断言成功，同时把返回值收窄成非 None，让调用方可以直接解包。"""
+	node = parse_share_link(link)
+	assert node is not None, f'预期能解析: {mask_link(link)}'
+	return node
+
+
 def test_parse_vless_reality():
-	remark, outbound = parse_share_link(VLESS_REALITY)
+	remark, outbound = _parse_ok(VLESS_REALITY)
 
 	assert remark == '节点A'
 	assert outbound['type'] == 'vless'
@@ -73,7 +80,7 @@ def test_parse_vless_reality():
 
 
 def test_parse_vless_ws_with_early_data():
-	_, outbound = parse_share_link(VLESS_WS)
+	_, outbound = _parse_ok(VLESS_WS)
 
 	assert outbound['tls']['insecure'] is True
 	assert outbound['tls']['server_name'] == 'sni.example.com'
@@ -88,7 +95,7 @@ def test_parse_vless_ws_with_early_data():
 
 def test_parse_vless_plaintext_has_no_tls():
 	link = 'vless://plain-uuid@p.example.com:2095?type=ws&path=%2F&security=none#plain'
-	_, outbound = parse_share_link(link)
+	_, outbound = _parse_ok(link)
 
 	assert 'tls' not in outbound
 	assert outbound['transport']['type'] == 'ws'
@@ -96,7 +103,7 @@ def test_parse_vless_plaintext_has_no_tls():
 
 def test_parse_vless_infers_tls_from_sni_when_security_missing():
 	link = 'vless://uuid@i.example.com:443?sni=i.example.com#inferred'
-	_, outbound = parse_share_link(link)
+	_, outbound = _parse_ok(link)
 
 	assert outbound['tls']['enabled'] is True
 	assert outbound['tls']['server_name'] == 'i.example.com'
@@ -104,7 +111,7 @@ def test_parse_vless_infers_tls_from_sni_when_security_missing():
 
 def test_parse_vless_ignores_unsupported_flow_and_fingerprint(capsys):
 	link = 'vless://uuid@f.example.com:443?security=tls&flow=xtls-rprx-direct&fp=weird#bad'
-	_, outbound = parse_share_link(link)
+	_, outbound = _parse_ok(link)
 
 	assert 'flow' not in outbound
 	assert 'utls' not in outbound['tls']
@@ -116,7 +123,7 @@ def test_parse_vless_rejects_missing_port():
 
 
 def test_parse_vmess():
-	_, outbound = parse_share_link(_vmess_link(VMESS_PAYLOAD))
+	_, outbound = _parse_ok(_vmess_link(VMESS_PAYLOAD))
 
 	assert outbound['type'] == 'vmess'
 	assert outbound['server'] == 'a.b.c.d'
@@ -131,7 +138,7 @@ def test_parse_vmess():
 
 def test_parse_vmess_port_as_int_and_zero_alter_id():
 	payload = dict(VMESS_PAYLOAD, port=443, aid=0, scy='zero', tls='', net='tcp')
-	_, outbound = parse_share_link(_vmess_link(payload))
+	_, outbound = _parse_ok(_vmess_link(payload))
 
 	assert outbound['server_port'] == 443
 	assert 'alter_id' not in outbound
@@ -142,7 +149,7 @@ def test_parse_vmess_port_as_int_and_zero_alter_id():
 
 def test_parse_vmess_tcp_http_header_becomes_http_transport():
 	payload = dict(VMESS_PAYLOAD, net='tcp', type='http', tls='')
-	_, outbound = parse_share_link(_vmess_link(payload))
+	_, outbound = _parse_ok(_vmess_link(payload))
 
 	assert outbound['transport']['type'] == 'http'
 	assert outbound['transport']['method'] == 'PUT'
@@ -150,7 +157,7 @@ def test_parse_vmess_tcp_http_header_becomes_http_transport():
 
 def test_parse_vmess_grpc_falls_back_to_path_as_service_name():
 	payload = dict(VMESS_PAYLOAD, net='grpc', serviceName='', path='/svc-name', tls='')
-	_, outbound = parse_share_link(_vmess_link(payload))
+	_, outbound = _parse_ok(_vmess_link(payload))
 
 	assert outbound['transport'] == {'type': 'grpc', 'service_name': 'svc-name'}
 
@@ -168,7 +175,7 @@ def test_parse_vmess_rejects_missing_fields():
 
 
 def test_parse_trojan_decodes_password_and_grpc():
-	remark, outbound = parse_share_link(TROJAN)
+	remark, outbound = _parse_ok(TROJAN)
 
 	assert remark == 'trojan'
 	assert outbound['type'] == 'trojan'
@@ -183,20 +190,20 @@ def test_parse_trojan_decodes_password_and_grpc():
 
 def test_parse_trojan_falls_back_to_host_as_sni():
 	link = 'trojan://pw@h.example.com:443?host=h.example.com#no-sni'
-	_, outbound = parse_share_link(link)
+	_, outbound = _parse_ok(link)
 
 	assert outbound['tls']['server_name'] == 'h.example.com'
 
 
 def test_parse_trojan_does_not_use_ip_host_as_sni():
 	link = 'trojan://pw@5.6.7.8:443?host=5.6.7.8#ip-sni'
-	_, outbound = parse_share_link(link)
+	_, outbound = _parse_ok(link)
 
 	assert 'server_name' not in outbound['tls']
 
 
 def test_parse_shadowsocks_base64_form():
-	remark, outbound = parse_share_link(SS_BASE64)
+	remark, outbound = _parse_ok(SS_BASE64)
 
 	assert remark == 'ss节点'
 	assert outbound == {
@@ -209,7 +216,7 @@ def test_parse_shadowsocks_base64_form():
 
 
 def test_parse_shadowsocks_plain_form():
-	_, outbound = parse_share_link(SS_PLAIN)
+	_, outbound = _parse_ok(SS_PLAIN)
 
 	assert outbound['method'] == 'chacha20-ietf-poly1305'
 	assert outbound['password'] == 'plain-pass'
@@ -218,7 +225,7 @@ def test_parse_shadowsocks_plain_form():
 def test_parse_shadowsocks_2022_method_keeps_base64_password():
 	key = base64.b64encode(b'0' * 32).decode()
 	userinfo = base64.urlsafe_b64encode(f'2022-blake3-aes-256-gcm:{key}'.encode()).decode()
-	_, outbound = parse_share_link(f'ss://{userinfo}@9.9.9.9:443#ss2022')
+	_, outbound = _parse_ok(f'ss://{userinfo}@9.9.9.9:443#ss2022')
 
 	assert outbound['method'] == '2022-blake3-aes-256-gcm'
 	assert outbound['password'] == key
@@ -234,7 +241,7 @@ def test_parse_shadowsocks_rejects_unparsable_userinfo():
 
 
 def test_parse_hysteria2():
-	remark, outbound = parse_share_link(HY2)
+	remark, outbound = _parse_ok(HY2)
 
 	assert remark == 'hy2'
 	assert outbound == {
@@ -250,7 +257,7 @@ def test_parse_hysteria2():
 
 
 def test_parse_hysteria2_scheme_alias_without_obfs():
-	_, outbound = parse_share_link(HYSTERIA2_ALIAS)
+	_, outbound = _parse_ok(HYSTERIA2_ALIAS)
 
 	assert outbound['type'] == 'hysteria2'
 	assert 'obfs' not in outbound
