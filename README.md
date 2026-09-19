@@ -382,6 +382,7 @@ uv run python -m cloakbrowser install
 # ANYROUTER_ACCOUNTS=[{"name":"账号1","email":"your@email.com","password":"your_password"}]
 # PROVIDERS={"agentrouter":{"domain":"https://agentrouter.org"}}
 # PROXY_SUBSCRIPTION_URL=https://example.com/sub?token=xxx
+# PROXY_SHARE_LINKS=vless://uuid@1.2.3.4:443?security=reality&pbk=xxx#节点A
 # CHECKIN_PROXY_URL=http://127.0.0.1:7890
 
 # 运行签到脚本
