@@ -7,7 +7,7 @@
 #   PROXY_REQUIRED     true 时探测失败则退出 1
 #   PROXY_PORT         本地 mixed 端口（HTTP/SOCKS 共用），默认 7890
 #   SINGBOX_VERSION    sing-box 版本，默认 v1.14.1
-#   PYTHON_BIN         生成配置用的 Python，默认 python3
+#   PYTHON_BIN         生成配置用的 Python，默认自动探测 python3 / python
 
 set -euo pipefail
 
@@ -22,7 +22,7 @@ PROXY_PORT="${PROXY_PORT:-7890}"
 PROXY_TEST_URL="${PROXY_TEST_URL:-https://www.google.com/generate_204}"
 SINGBOX_VERSION="${SINGBOX_VERSION:-v1.14.1}"
 PROXY_REQUIRED="${PROXY_REQUIRED:-false}"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+VERSION="${SINGBOX_VERSION#v}"
 
 # 失败时按 PROXY_REQUIRED 决定是中断 workflow 还是放行（不设代理继续签到）
 fail() {
@@ -32,6 +32,67 @@ fail() {
 	fi
 	exit 0
 }
+
+# 按 uname 选择发行包，避免在非 linux/amd64 的机器上下到跑不起来的二进制。
+# 只映射 sing-box 官方确实发布了的组合，其余直接报错而不是猜。
+detect_platform() {
+	local kernel arch
+	kernel="$(uname -s)"
+	arch="$(uname -m)"
+	case "${kernel}" in
+		Linux) OS='linux' ;;
+		Darwin) OS='darwin' ;;
+		MINGW* | MSYS* | CYGWIN*) OS='windows' ;;
+		*) fail "不支持的操作系统: ${kernel}（请自行启动代理并设置 CHECKIN_PROXY_URL）" ;;
+	esac
+	case "${arch}" in
+		x86_64 | amd64) ARCH='amd64' ;;
+		aarch64 | arm64) ARCH='arm64' ;;
+		armv7*) ARCH='armv7' ;;
+		i386 | i686) ARCH='386' ;;
+		riscv64) ARCH='riscv64' ;;
+		*) fail "不支持的 CPU 架构: ${arch}" ;;
+	esac
+
+	if [[ "${OS}" == 'windows' ]]; then
+		# windows 只有 zip，且没有 armv7 / riscv64
+		if [[ "${ARCH}" != 'amd64' && "${ARCH}" != 'arm64' && "${ARCH}" != '386' ]]; then
+			fail "sing-box 没有 windows-${ARCH} 发行包"
+		fi
+		ARCHIVE="sing-box-${VERSION}-windows-${ARCH}.zip"
+		BIN_NAME='sing-box.exe'
+	else
+		if [[ "${OS}" == 'darwin' && "${ARCH}" != 'amd64' && "${ARCH}" != 'arm64' ]]; then
+			fail "sing-box 没有 darwin-${ARCH} 发行包"
+		fi
+		ARCHIVE="sing-box-${VERSION}-${OS}-${ARCH}.tar.gz"
+		BIN_NAME='sing-box'
+	fi
+}
+
+# 生成配置只用标准库，但 python3 在部分 Windows 上是 Microsoft Store 的占位程序，
+# 必须真的跑一次才算可用，否则 command -v 会选中一个打不开的解释器
+detect_python() {
+	if [[ -n "${PYTHON_BIN:-}" ]]; then
+		printf '%s' "${PYTHON_BIN}"
+		return
+	fi
+	local candidate
+	for candidate in python3 python; do
+		if command -v "${candidate}" >/dev/null 2>&1 && "${candidate}" -c 'import sys' >/dev/null 2>&1; then
+			printf '%s' "${candidate}"
+			return
+		fi
+	done
+	printf ''
+}
+
+detect_platform
+PYTHON_BIN="$(detect_python)"
+if [[ -z "${PYTHON_BIN}" ]]; then
+	fail "找不到可用的 python3 / python，无法生成 sing-box 配置"
+fi
+echo "[INFO] Using ${PYTHON_BIN} ($("${PYTHON_BIN}" -c 'import sys; print(sys.version.split()[0])'))"
 
 mkdir -p "${PROXY_DIR}"
 cd "${PROXY_DIR}"
@@ -50,16 +111,29 @@ if ! (cd "${REPO_ROOT}" && "${PYTHON_BIN}" -m utils.singbox \
 fi
 rm -f links.txt
 
-echo "[INFO] Downloading sing-box ${SINGBOX_VERSION}..."
-VERSION="${SINGBOX_VERSION#v}"
-ARCHIVE="sing-box-${VERSION}-linux-amd64.tar.gz"
+echo "[INFO] Downloading sing-box ${SINGBOX_VERSION} (${OS}-${ARCH})..."
 if ! curl --retry 3 --retry-delay 5 --retry-all-errors -fsSL -o "${ARCHIVE}" \
 	"https://github.com/SagerNet/sing-box/releases/download/${SINGBOX_VERSION}/${ARCHIVE}"; then
-	echo "[WARN] Failed to download sing-box ${SINGBOX_VERSION}"
+	echo "[WARN] Failed to download sing-box ${SINGBOX_VERSION} (${ARCHIVE})"
 	fail "Failed to download sing-box ${SINGBOX_VERSION}"
 fi
-tar -xzf "${ARCHIVE}"
-SINGBOX_BIN="$(find . -maxdepth 3 -type f -name sing-box -print -quit)"
+if [[ "${ARCHIVE}" == *.zip ]]; then
+	if ! command -v unzip >/dev/null 2>&1; then
+		fail "解压 ${ARCHIVE} 需要 unzip，当前环境没有安装"
+	fi
+	unzip -o -q "${ARCHIVE}"
+else
+	tar -xzf "${ARCHIVE}"
+fi
+
+# 用 shell glob 定位二进制，不依赖 GNU find 的 -print -quit（BSD/macOS 的 find 没有）
+SINGBOX_BIN=''
+for candidate in "sing-box-${VERSION}-${OS}-${ARCH}/${BIN_NAME}" "${BIN_NAME}" sing-box-*/"${BIN_NAME}"; do
+	if [[ -f "${candidate}" ]]; then
+		SINGBOX_BIN="${candidate}"
+		break
+	fi
+done
 if [[ -z "${SINGBOX_BIN}" ]]; then
 	fail "sing-box binary not found in ${ARCHIVE}"
 fi
