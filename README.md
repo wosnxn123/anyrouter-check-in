@@ -290,9 +290,9 @@
 
 ```
 vless://00000000-0000-0000-0000-000000000000@example.com:443?security=tls&sni=example.com&type=ws&path=%2Fws#节点A
-ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ=@1.2.3.4:8388#节点B
-socks5://user:pass@1.2.3.4:1080#节点C
-http://user:pass@1.2.3.4:8080#节点D
+ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ=@203.0.113.10:8388#节点B
+socks5://user:pass@203.0.113.10:1080#节点C
+http://user:pass@203.0.113.10:8080#节点D
 ```
 
 SOCKS / HTTP 这几类的用户名和密码都可以省略；`socks://` 等同 `socks5://`；`http://` 端口缺省 80，`https://` 缺省 443 并自动启用 TLS（可用 `?sni=` 和 `?insecure=1` 调整）。密码里带 `@` 或 `:` 也能正确解析，不必手动做 URL 编码。
@@ -393,7 +393,7 @@ uv run python -m cloakbrowser install
 # ANYROUTER_ACCOUNTS=[{"name":"账号1","email":"your@email.com","password":"your_password"}]
 # PROVIDERS={"agentrouter":{"domain":"https://agentrouter.org"}}
 # PROXY_SUBSCRIPTION_URL=https://example.com/sub?token=xxx
-# PROXY_SHARE_LINKS=vless://uuid@1.2.3.4:443?security=reality&pbk=xxx#节点A
+# PROXY_SHARE_LINKS=vless://uuid@203.0.113.10:443?security=reality&pbk=xxx#节点A
 # CHECKIN_PROXY_URL=http://127.0.0.1:7890
 
 # 运行签到脚本

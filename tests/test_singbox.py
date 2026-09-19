@@ -8,7 +8,7 @@ import pytest
 from utils.singbox import ParsedNode, build_config, mask_link, parse_share_link, parse_share_links
 
 VLESS_REALITY = (
-	'vless://11111111-2222-3333-4444-555555555555@1.2.3.4:443'
+	'vless://11111111-2222-3333-4444-555555555555@203.0.113.10:443'
 	'?encryption=none&security=reality&sni=www.microsoft.com&fp=chrome'
 	'&pbk=PUBLIC_KEY_XYZ&sid=abcd1234&type=tcp&flow=xtls-rprx-vision#%E8%8A%82%E7%82%B9A'
 )
@@ -17,11 +17,11 @@ VLESS_WS = (
 	'&host=cdn.example.com&sni=sni.example.com&allowInsecure=1&ed=2048#WS%E8%8A%82%E7%82%B9'
 )
 TROJAN = 'trojan://pass%40word@t.example.com:443?sni=t.example.com&type=grpc&serviceName=svc&allowInsecure=1#trojan'
-SS_BASE64 = 'ss://{}@1.1.1.1:8388#ss%E8%8A%82%E7%82%B9'.format(
+SS_BASE64 = 'ss://{}@203.0.113.11:8388#ss%E8%8A%82%E7%82%B9'.format(
 	base64.urlsafe_b64encode(b'aes-256-gcm:secret-password').decode()
 )
-SS_PLAIN = 'ss://chacha20-ietf-poly1305:plain-pass@2.2.2.2:8389#ss-plain'
-SS_PLUGIN = 'ss://{}@3.3.3.3:8390?plugin=obfs-local%3Bobfs%3Dhttp#ss-plugin'.format(
+SS_PLAIN = 'ss://chacha20-ietf-poly1305:plain-pass@203.0.113.12:8389#ss-plain'
+SS_PLUGIN = 'ss://{}@203.0.113.13:8390?plugin=obfs-local%3Bobfs%3Dhttp#ss-plugin'.format(
 	base64.urlsafe_b64encode(b'aes-128-gcm:pw').decode()
 )
 HY2 = 'hy2://user:pass@h2.example.com:443?sni=h2.example.com&insecure=1&obfs=salamander&obfs-password=obfspw&upmbps=50&downmbps=100#hy2'
@@ -63,7 +63,7 @@ def test_parse_vless_reality():
 
 	assert remark == '节点A'
 	assert outbound['type'] == 'vless'
-	assert outbound['server'] == '1.2.3.4'
+	assert outbound['server'] == '203.0.113.10'
 	assert outbound['server_port'] == 443
 	assert outbound['uuid'] == '11111111-2222-3333-4444-555555555555'
 	assert outbound['flow'] == 'xtls-rprx-vision'
@@ -119,7 +119,7 @@ def test_parse_vless_ignores_unsupported_flow_and_fingerprint(capsys):
 
 
 def test_parse_vless_rejects_missing_port():
-	assert parse_share_link('vless://uuid@1.2.3.4#noport') is None
+	assert parse_share_link('vless://uuid@203.0.113.10#noport') is None
 
 
 def test_parse_vmess():
@@ -196,7 +196,7 @@ def test_parse_trojan_falls_back_to_host_as_sni():
 
 
 def test_parse_trojan_does_not_use_ip_host_as_sni():
-	link = 'trojan://pw@5.6.7.8:443?host=5.6.7.8#ip-sni'
+	link = 'trojan://pw@203.0.113.14:443?host=203.0.113.14#ip-sni'
 	_, outbound = _parse_ok(link)
 
 	assert 'server_name' not in outbound['tls']
@@ -208,7 +208,7 @@ def test_parse_shadowsocks_base64_form():
 	assert remark == 'ss节点'
 	assert outbound == {
 		'type': 'shadowsocks',
-		'server': '1.1.1.1',
+		'server': '203.0.113.11',
 		'server_port': 8388,
 		'method': 'aes-256-gcm',
 		'password': 'secret-password',
@@ -225,7 +225,7 @@ def test_parse_shadowsocks_plain_form():
 def test_parse_shadowsocks_2022_method_keeps_base64_password():
 	key = base64.b64encode(b'0' * 32).decode()
 	userinfo = base64.urlsafe_b64encode(f'2022-blake3-aes-256-gcm:{key}'.encode()).decode()
-	_, outbound = _parse_ok(f'ss://{userinfo}@9.9.9.9:443#ss2022')
+	_, outbound = _parse_ok(f'ss://{userinfo}@203.0.113.15:443#ss2022')
 
 	assert outbound['method'] == '2022-blake3-aes-256-gcm'
 	assert outbound['password'] == key
@@ -237,7 +237,7 @@ def test_parse_shadowsocks_skips_plugin_node(capsys):
 
 
 def test_parse_shadowsocks_rejects_unparsable_userinfo():
-	assert parse_share_link('ss://notbase64!!@1.1.1.1:8388#bad') is None
+	assert parse_share_link('ss://notbase64!!@203.0.113.11:8388#bad') is None
 
 
 def test_parse_hysteria2():
@@ -480,15 +480,15 @@ def test_build_config_rejects_empty_nodes():
 
 
 def test_mask_link_hides_credentials(capsys):
-	assert mask_link(VLESS_REALITY) == 'vless://***@1.2.3.4:443'
-	assert mask_link(SS_BASE64) == 'ss://***@1.1.1.1:8388'
+	assert mask_link(VLESS_REALITY) == 'vless://***@203.0.113.10:443'
+	assert mask_link(SS_BASE64) == 'ss://***@203.0.113.11:8388'
 	assert mask_link('not-a-link') == '<不是合法的分享链接>'
 
-	parse_share_link('vless://super-secret-uuid@1.2.3.4:443#x')
+	parse_share_link('vless://super-secret-uuid@203.0.113.10:443#x')
 	parse_share_link('trojan://hunter2@t.example.com:443?sni=a#x')
 
 	# 解析失败的告警里不能出现密码
-	assert parse_share_link('ss://!!!!@1.1.1.1:8388#x') is None
+	assert parse_share_link('ss://!!!!@203.0.113.11:8388#x') is None
 	err = capsys.readouterr().err
 	assert 'super-secret-uuid' not in err
 	assert 'hunter2' not in err
