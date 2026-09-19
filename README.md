@@ -272,11 +272,25 @@
 
 ## 代理配置（可选）
 
-内置的 `agentrouter` 默认 `use_proxy: true`。如果你的运行环境访问该平台不稳定，可以在 GitHub Actions 中配置 mihomo 订阅代理。
+内置的 `agentrouter` 默认 `use_proxy: true`。如果你的运行环境访问该平台不稳定，可以在 GitHub Actions 中配置代理。
 
-在仓库 Settings -> Environments -> production -> Environment secrets 中添加：
+在仓库 Settings -> Environments -> production -> Environment secrets 中添加下面**任意一个**：
 
-- `PROXY_SUBSCRIPTION_URL`：Clash/Mihomo 订阅链接。设置后，workflow 会运行 `scripts/setup_mihomo_proxy.sh`，启动本地代理并写入 `CHECKIN_PROXY_URL`。
+- `PROXY_SUBSCRIPTION_URL`：Clash/Mihomo 订阅链接。设置后 workflow 会启动 mihomo 拉取订阅。
+- `PROXY_SHARE_LINKS`：直接填写节点分享链接，**一行一个**，可以填多个。设置后 workflow 会启动 sing-box，把所有节点放进一个自动测速分组（`urltest`），由 sing-box 自己选出可用节点。
+
+> 两个都设置时，**只使用 `PROXY_SUBSCRIPTION_URL`，`PROXY_SHARE_LINKS` 会被忽略**。
+
+`PROXY_SHARE_LINKS` 支持的分享链接协议：`vless://`、`vmess://`、`trojan://`、`ss://`（Shadowsocks）、`hy2://` / `hysteria2://`（Hysteria2）。链接末尾的 `#备注` 会作为节点名，可以省略；解析不了的行会被跳过并打印告警，不影响其它节点。Secret 的值就是普通多行文本，直接粘贴即可：
+
+```
+vless://00000000-0000-0000-0000-000000000000@example.com:443?security=tls&sni=example.com&type=ws&path=%2Fws#节点A
+ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ=@1.2.3.4:8388#节点B
+```
+
+带 `plugin=` 的 Shadowsocks 插件节点（如 `obfs-local`）不支持，会被跳过。
+
+两种方式都由 `scripts/setup_proxy.sh` 统一分发，启动本地代理后写入 `CHECKIN_PROXY_URL`，签到脚本会自动读取。
 
 本地运行时也可以直接使用已有代理：
 
