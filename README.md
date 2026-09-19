@@ -281,14 +281,25 @@
 
 > 两个都设置时，**只使用 `PROXY_SUBSCRIPTION_URL`，`PROXY_SHARE_LINKS` 会被忽略**。
 
-`PROXY_SHARE_LINKS` 支持的分享链接协议：`vless://`、`vmess://`、`trojan://`、`ss://`（Shadowsocks）、`hy2://` / `hysteria2://`（Hysteria2）。链接末尾的 `#备注` 会作为节点名，可以省略；解析不了的行会被跳过并打印告警，不影响其它节点。Secret 的值就是普通多行文本，直接粘贴即可：
+`PROXY_SHARE_LINKS` 支持两类写法：
+
+- **隧道协议分享链接**：`vless://`、`vmess://`、`trojan://`、`ss://`（Shadowsocks）、`hy2://` / `hysteria2://`（Hysteria2）
+- **普通代理服务器**：`socks://` / `socks5://` / `socks4://` / `socks4a://`、`http://` / `https://`，格式为 `协议://用户名:密码@地址:端口`
+
+链接末尾的 `#备注` 会作为节点名，可以省略；解析不了的行会被跳过并打印告警，不影响其它节点。Secret 的值就是普通多行文本，直接粘贴即可：
 
 ```
 vless://00000000-0000-0000-0000-000000000000@example.com:443?security=tls&sni=example.com&type=ws&path=%2Fws#节点A
 ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ=@1.2.3.4:8388#节点B
+socks5://user:pass@1.2.3.4:1080#节点C
+http://user:pass@1.2.3.4:8080#节点D
 ```
 
+SOCKS / HTTP 这几类的用户名和密码都可以省略；`socks://` 等同 `socks5://`；`http://` 端口缺省 80，`https://` 缺省 443 并自动启用 TLS（可用 `?sni=` 和 `?insecure=1` 调整）。密码里带 `@` 或 `:` 也能正确解析，不必手动做 URL 编码。
+
 带 `plugin=` 的 Shadowsocks 插件节点（如 `obfs-local`）不支持，会被跳过。
+
+> `https://` 会被当成「HTTPS 代理服务器」来解析，所以不要把订阅链接粘进 `PROXY_SHARE_LINKS` —— 订阅链接请填 `PROXY_SUBSCRIPTION_URL`。
 
 两种方式都由 `scripts/setup_proxy.sh` 统一分发，启动本地代理后写入 `CHECKIN_PROXY_URL`，签到脚本会自动读取。
 

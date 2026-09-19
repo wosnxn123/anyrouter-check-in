@@ -269,9 +269,142 @@ def test_parse_hysteria2_rejects_missing_password():
 	assert parse_share_link('hy2://h2.example.com:443#nopw') is None
 
 
+def test_parse_socks5_with_credentials():
+	remark, outbound = _parse_ok('socks5://user:p%40ss@proxy.example.com:1080#socks节点')
+
+	assert remark == 'socks节点'
+	assert outbound == {
+		'type': 'socks',
+		'server': 'proxy.example.com',
+		'server_port': 1080,
+		'version': '5',
+		'username': 'user',
+		'password': 'p@ss',
+	}
+
+
+def test_parse_socks_bare_scheme_defaults_to_version_5():
+	_, outbound = _parse_ok('socks://127.0.0.1:1080')
+
+	assert outbound == {'type': 'socks', 'server': '127.0.0.1', 'server_port': 1080, 'version': '5'}
+
+
+def test_parse_socks4_and_socks4a_versions():
+	_, socks4 = _parse_ok('socks4://127.0.0.1:1080')
+	_, socks4a = _parse_ok('socks4a://127.0.0.1:1080')
+
+	assert socks4['version'] == '4'
+	assert socks4a['version'] == '4a'
+
+
+def test_parse_socks_keeps_colon_and_at_inside_password():
+	_, outbound = _parse_ok('socks5://user:pa:ss@word@127.0.0.1:1080')
+
+	assert outbound['username'] == 'user'
+	assert outbound['password'] == 'pa:ss@word'
+
+
+def test_parse_socks_username_without_password():
+	_, outbound = _parse_ok('socks5://onlyuser@127.0.0.1:1080')
+
+	assert outbound['username'] == 'onlyuser'
+	assert 'password' not in outbound
+
+
+def test_parse_socks_rejects_missing_port():
+	assert parse_share_link('socks5://127.0.0.1') is None
+
+
+def test_parse_socks_supports_ipv6_literal():
+	_, outbound = _parse_ok('socks5://[2001:db8::1]:1080')
+
+	assert outbound['server'] == '2001:db8::1'
+	assert outbound['server_port'] == 1080
+
+
+def test_parse_http_proxy_with_credentials():
+	remark, outbound = _parse_ok('http://user:pass@proxy.example.com:8080#http节点')
+
+	assert remark == 'http节点'
+	assert outbound == {
+		'type': 'http',
+		'server': 'proxy.example.com',
+		'server_port': 8080,
+		'username': 'user',
+		'password': 'pass',
+	}
+
+
+def test_parse_http_defaults_to_port_80_without_tls():
+	_, outbound = _parse_ok('http://proxy.example.com')
+
+	assert outbound['server_port'] == 80
+	assert 'tls' not in outbound
+
+
+def test_parse_https_enables_tls_and_uses_host_as_sni():
+	_, outbound = _parse_ok('https://user:pass@proxy.example.com:8443')
+
+	assert outbound == {
+		'type': 'http',
+		'server': 'proxy.example.com',
+		'server_port': 8443,
+		'username': 'user',
+		'password': 'pass',
+		'tls': {'enabled': True, 'server_name': 'proxy.example.com'},
+	}
+
+
+def test_parse_https_defaults_to_port_443_and_ip_host_has_no_sni():
+	_, outbound = _parse_ok('https://203.0.113.7')
+
+	assert outbound['server_port'] == 443
+	assert outbound['tls'] == {'enabled': True}
+
+
+def test_parse_https_honours_sni_and_insecure_params():
+	_, outbound = _parse_ok('https://203.0.113.7:8443?sni=proxy.example.com&insecure=1')
+
+	assert outbound['tls'] == {'enabled': True, 'server_name': 'proxy.example.com', 'insecure': True}
+
+
+def test_parse_http_rejects_invalid_port():
+	assert parse_share_link('http://proxy.example.com:notaport') is None
+
+
+def test_parse_http_rejects_missing_host():
+	assert parse_share_link('http://:8080') is None
+
+
+def test_plain_proxy_warnings_do_not_leak_credentials(capsys):
+	assert parse_share_link('socks5://user:topsecret@127.0.0.1') is None
+
+	assert 'topsecret' not in capsys.readouterr().err
+
+
+def test_parse_share_links_mixes_tunnel_and_plain_proxies():
+	nodes = parse_share_links(
+		'socks5://user:pass@127.0.0.1:1080#本地SOCKS\nhttps://203.0.113.7:8443#远端HTTP\n' + TROJAN
+	)
+
+	assert [tag for tag, _ in nodes] == ['本地SOCKS', '远端HTTP', 'trojan']
+	assert [outbound['type'] for _, outbound in nodes] == ['socks', 'http', 'trojan']
+
+
+def test_build_config_groups_plain_proxy_nodes():
+	nodes = parse_share_links('socks5://127.0.0.1:1080\nhttp://user:pass@127.0.0.1:8080')
+
+	config = build_config(nodes)
+	group = config['outbounds'][-1]
+
+	assert group['type'] == 'urltest'
+	assert group['outbounds'] == [outbound['tag'] for outbound in config['outbounds'][:-1]]
+	assert [outbound['type'] for outbound in config['outbounds'][:-1]] == ['socks', 'http']
+
+
 def test_unsupported_scheme_returns_none(capsys):
-	assert parse_share_link('http://127.0.0.1:1080') is None
-	assert '不支持的协议 http' in capsys.readouterr().err
+	assert parse_share_link('ftp://127.0.0.1:21') is None
+	assert '不支持的协议 ftp' in capsys.readouterr().err
 
 
 def test_link_without_scheme_returns_none():
@@ -286,7 +419,7 @@ def test_parse_share_links_handles_multiple_lines_and_skips_junk():
 			'# 这是注释行',
 			VLESS_REALITY,
 			'not-a-link',
-			'http://127.0.0.1:1080',
+			'ftp://127.0.0.1:21',
 			TROJAN,
 			SS_BASE64,
 			HY2,

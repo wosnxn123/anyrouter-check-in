@@ -31,7 +31,20 @@ import sys
 from typing import Any, Callable
 from urllib.parse import parse_qsl, unquote, urlsplit
 
-SUPPORTED_SCHEMES: tuple[str, ...] = ('vless', 'vmess', 'trojan', 'ss', 'hy2', 'hysteria2')
+SUPPORTED_SCHEMES: tuple[str, ...] = (
+	'vless',
+	'vmess',
+	'trojan',
+	'ss',
+	'hy2',
+	'hysteria2',
+	'socks',
+	'socks4',
+	'socks4a',
+	'socks5',
+	'http',
+	'https',
+)
 DEFAULT_TEST_URL = 'https://www.google.com/generate_204'
 DEFAULT_GROUP_TAG = 'CHECKIN'
 
@@ -41,6 +54,7 @@ _UTLS_FINGERPRINTS = frozenset(
 _VMESS_SECURITY = frozenset({'auto', 'none', 'aes-128-gcm', 'chacha20-poly1305', 'packetaddr'})
 _PACKET_ENCODING = frozenset({'packetaddr', 'xudp'})
 _TLS_SECURITY = frozenset({'tls', 'reality'})
+_SOCKS_VERSIONS = {'socks': '5', 'socks5': '5', 'socks4': '4', 'socks4a': '4a'}
 
 ParsedNode = tuple[str, dict[str, Any]]
 
@@ -432,6 +446,72 @@ def _parse_hysteria2(link: str) -> ParsedNode | None:
 	return unquote(split.fragment), outbound
 
 
+def _split_credentials(userinfo: str) -> tuple[str, str]:
+	"""拆分 `user:pass`；没有冒号时整体当用户名（SOCKS/HTTP 代理允许只填用户名或都不填）。"""
+	if not userinfo:
+		return '', ''
+	username, sep, password = userinfo.partition(':')
+	if not sep:
+		return username, ''
+	return username, password
+
+
+def _parse_socks(link: str) -> ParsedNode | None:
+	"""socks:// socks4:// socks4a:// socks5://user:pass@host:port#备注"""
+	split = urlsplit(link)
+	userinfo, host, port_text = _split_netloc(split.netloc)
+	port = _to_port(port_text)
+	if not host or port is None:
+		_warn(f'SOCKS 链接缺少地址 / 端口，已跳过: {mask_link(link)}')
+		return None
+	outbound: dict[str, Any] = {
+		'type': 'socks',
+		'server': host,
+		'server_port': port,
+		'version': _SOCKS_VERSIONS.get(split.scheme.strip().lower(), '5'),
+	}
+	username, password = _split_credentials(userinfo)
+	if username:
+		outbound['username'] = username
+	if password:
+		outbound['password'] = password
+	return unquote(split.fragment), outbound
+
+
+def _parse_http(link: str) -> ParsedNode | None:
+	"""http:// https://user:pass@host:port#备注 —— 生成 sing-box 的 HTTP CONNECT 出站。
+
+	端口缺省时按 URL 语义补 80 / 443；`https://` 额外打开 tls。
+	"""
+	split = urlsplit(link)
+	scheme = split.scheme.strip().lower()
+	tls_enabled = scheme == 'https'
+	params = _query_dict(split.query)
+	userinfo, host, port_text = _split_netloc(split.netloc)
+	if not host:
+		_warn(f'HTTP 代理链接缺少地址，已跳过: {mask_link(link)}')
+		return None
+	if port_text:
+		port = _to_port(port_text)
+		if port is None:
+			_warn(f'HTTP 代理链接端口非法，已跳过: {mask_link(link)}')
+			return None
+	else:
+		port = 443 if tls_enabled else 80
+	outbound: dict[str, Any] = {'type': 'http', 'server': host, 'server_port': port}
+	username, password = _split_credentials(userinfo)
+	if username:
+		outbound['username'] = username
+	if password:
+		outbound['password'] = password
+	if tls_enabled:
+		outbound['tls'] = _tls(
+			server_name=params.get('sni', '').strip() or ('' if _is_ip(host) else host),
+			insecure=_truthy(params.get('insecure', '')) or _truthy(params.get('allowInsecure', '')),
+		)
+	return unquote(split.fragment), outbound
+
+
 _PARSERS: dict[str, Callable[[str], ParsedNode | None]] = {
 	'vless': _parse_vless,
 	'vmess': _parse_vmess,
@@ -439,6 +519,12 @@ _PARSERS: dict[str, Callable[[str], ParsedNode | None]] = {
 	'ss': _parse_shadowsocks,
 	'hy2': _parse_hysteria2,
 	'hysteria2': _parse_hysteria2,
+	'socks': _parse_socks,
+	'socks4': _parse_socks,
+	'socks4a': _parse_socks,
+	'socks5': _parse_socks,
+	'http': _parse_http,
+	'https': _parse_http,
 }
 
 
